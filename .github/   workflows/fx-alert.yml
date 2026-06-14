@@ -1,0 +1,46 @@
+name: USD-KRW FX Alert
+
+on:
+  schedule:
+    # 5분마다 실행. GitHub Actions는 UTC로 동작하지만 24시간 가동이라 무관하다.
+    # 부하가 몰리면 예정 시각보다 수 분~십수 분 늦게 실행될 수 있다.
+    - cron: '*/5 * * * *'
+  workflow_dispatch: {}   # Actions 탭에서 수동 실행(테스트)용
+
+permissions:
+  contents: write          # state.json 변경분 커밋에 필요
+
+concurrency:
+  group: fx-alert
+  cancel-in-progress: false
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Run FX alert
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+        run: python fx_alert.py
+
+      - name: Commit state if changed
+        run: |
+          if [ -n "$(git status --porcelain state.json)" ]; then
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git add state.json
+            git commit -m "chore: update fx state [skip ci]"
+            git push
+          else
+            echo "No state change."
+          fi
