@@ -44,9 +44,10 @@ UA = {"User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
 
 
 # ──────────────────────────────────────────────────────────────
-# 환율 수집 (출처 우선순위: 야후 → 네이버 → er-api)
-#   야후 KRW=X 와 네이버 매매기준율은 몇 원 차이가 날 수 있다.
-#   '네이버에 뜨는 숫자'를 쓰고 싶으면 SOURCES 순서를 (fetch_naver, fetch_yahoo, ...)로 바꾼다.
+# 환율 수집 (출처 우선순위: 네이버 → 야후 → er-api)
+#   GitHub Actions 러너 IP에서는 야후가 429(Too Many Requests)를 자주 반환한다.
+#   그래서 네이버 매매기준율을 우선으로 둔다. 네이버 실패 시에만 야후를 시도한다.
+#   야후 spot과 네이버 매매기준율은 몇 원 차이가 날 수 있다.
 # ──────────────────────────────────────────────────────────────
 def fetch_yahoo():
     url = "https://query1.finance.yahoo.com/v8/finance/chart/KRW=X"
@@ -78,7 +79,7 @@ def fetch_erapi():
     return float(r.json()["rates"]["KRW"])
 
 
-SOURCES = (fetch_yahoo, fetch_naver, fetch_erapi)
+SOURCES = (fetch_naver, fetch_yahoo, fetch_erapi)
 
 
 def get_rate():
@@ -159,9 +160,21 @@ def send_telegram(text):
         json={"chat_id": chat_id, "text": text, "disable_web_page_preview": True},
         timeout=10,
     )
-    # 토큰이 URL에 들어가므로 실패 시 토큰이 로그에 남지 않도록 상태코드만 출력
+    # 토큰이 URL에 들어가므로 실패 시 토큰이 로그에 남지 않도록 한다.
+    # 응답 본문에는 토큰이 없으므로 텔레그램이 준 설명은 그대로 노출해 진단을 돕는다.
     if not r.ok:
-        raise RuntimeError(f"텔레그램 전송 실패: HTTP {r.status_code}")
+        detail = ""
+        try:
+            detail = r.json().get("description", "")
+        except Exception:
+            pass
+        if r.status_code == 401:
+            hint = " — 봇 토큰이 잘못됨. TELEGRAM_BOT_TOKEN 값 확인."
+        elif r.status_code in (400, 403):
+            hint = " — chat_id가 틀렸거나 봇에게 먼저 메시지를 보내지 않음."
+        else:
+            hint = ""
+        raise RuntimeError(f"텔레그램 전송 실패: HTTP {r.status_code} {detail}{hint}")
 
 
 # ──────────────────────────────────────────────────────────────
